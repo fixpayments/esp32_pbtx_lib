@@ -9,7 +9,7 @@
 
 
 
-size_t pbtx_create_private_key(uint8_t type, char* buf, size_t buflen);
+int pbtx_create_private_key(uint8_t type, unsigned char* buf, size_t buflen);
 
 
 
