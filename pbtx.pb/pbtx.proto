@@ -1,0 +1,96 @@
+syntax = "proto3";
+// version: 3
+option java_multiple_files = true;
+
+package pbtx;
+
+
+message TransactionBody {
+    // network identity
+    fixed64 network_id = 1;
+
+    // actor account ID
+    fixed64 actor = 2 [jstype = JS_STRING];
+
+    // optional list of co-signing accounts (maximum 4)
+    repeated fixed64 cosignors = 3 [jstype = JS_STRING];
+
+    // actor’s transaction sequence number
+    uint32 seqnum = 4;
+
+    // previous TransactionBody's hash: first 8 bytes of sha256,
+    // stored as big-endian (first byte of the sha256 hash in
+    // higherst byte of prevhash)
+    fixed64 prev_hash = 5 [jstype = JS_STRING];
+
+    // network-specific transaction type. PBTX does not interpret the
+    // type and content, and passes them over for processing
+    uint32 transaction_type = 6;
+
+    // transaction content in protobuf format (max length 16384)
+    bytes transaction_content = 7;
+}
+
+
+message Transaction {
+    // protobuf-encoded TransactionBody
+    bytes body = 1;
+
+    // array of authorities. Each authority signs a sha256 hash of the
+    // body bytes. The actor's authority should go first, followed by
+    // cosignor authorities in exact order of cosignors field.
+    // (maximum 8)
+    repeated Authority authorities = 2;
+}
+
+
+// Permission object allows specifying up to 16 public keys with their
+// weights to meet the threshold.
+message Permission {
+    fixed64 actor = 1 [jstype = JS_STRING];
+    uint32  threshold = 2;
+    repeated KeyWeight keys = 3;
+}
+
+
+enum KeyType {
+    EOSIO_KEY = 0;
+}
+
+
+message KeyWeight {
+    PublicKey key = 1;
+    uint32 weight = 2;
+}
+
+// for EOSIO_KEY key type, the key_bytes contains a binary
+// representation of a public key in EOSIO compatible format.
+message PublicKey {
+    KeyType type = 1;
+    bytes key_bytes = 2;
+}
+
+// Authority object contains signatures using one or more keys
+// specified in Permission object. A valid Authority object should
+// have the sum of matched key weights equal or higher to
+// Permission.threshold value.
+message Authority {
+    KeyType type = 1;
+    repeated bytes sigs = 2;
+}
+
+
+// Transactionns are sent to a blockchain (such as EOSIO), and the
+// blockchain registers the event with a timestamp and transaction
+// ID. This message contains a copy of PBTX transaction and the
+// corresponding blockchain transaction attributes.
+message TransactionHistoryEntry {
+    // protobuf-encoded Transaction
+    bytes transaction = 1;
+
+    // microseconds since Epoch as recorded in the backend blockchain
+    fixed64 backend_timestamp = 2 [jstype = JS_STRING];
+
+    // transaction ID in the blockchain (normally, a 256-bit hash)
+    bytes backend_trxid = 3;
+}
