@@ -6,7 +6,8 @@ idf_component_register(
   "nanopb/pb_common.c"
   "nanopb/pb_encode.c"  
   INCLUDE_DIRS include
-  PRIV_INCLUDE_DIRS nanopb)
+  PRIV_INCLUDE_DIRS nanopb
+  REQUIRES mbedtls)
 
 add_subdirectory(pbtx.pb)
 
