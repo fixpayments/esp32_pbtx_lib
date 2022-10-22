@@ -8,14 +8,16 @@
 #define PBTX_KEY_TYPE_ANTELOPE_R1 1
 
 
+#include "mbedtls/pk.h"
 
-int pbtx_create_private_key(uint8_t type, unsigned char* buf, size_t buflen);
+typedef struct pbtx_client_context
+{
+    mbedtls_pk_context* key;
+} pbtx_client_context;
 
 
-
-
-
-
+void pbtx_init_client(pbtx_client_context* ctx);
+        
 
 
 
