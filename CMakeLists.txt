@@ -5,7 +5,7 @@ idf_component_register(
   "pbtx_client.c"
   "esp32_pbtx_signature_provider.c"
   "nanopb/pb_common.c"
-  "nanopb/pb_encode.c"  
+  "nanopb/pb_encode.c"
   INCLUDE_DIRS include
   PRIV_INCLUDE_DIRS nanopb
   REQUIRES mbedtls nvs_flash)

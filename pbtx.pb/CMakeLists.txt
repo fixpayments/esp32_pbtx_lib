@@ -9,7 +9,10 @@ message ("PROTO_HDRS = ${PROTO_HDRS}")
 
 target_include_directories(${COMPONENT_LIB} PUBLIC ${NANOPB_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 
-add_custom_target(pbtx_pb DEPENDS ${PROTO_SRCS})
+add_library(pbtx_pb STATIC ${PROTO_SRCS})
+target_include_directories(pbtx_pb PUBLIC ${NANOPB_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+
 add_dependencies(${COMPONENT_LIB} pbtx_pb)
+target_link_libraries(${COMPONENT_LIB} PUBLIC pbtx_pb)
 
 

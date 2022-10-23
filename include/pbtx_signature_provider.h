@@ -13,9 +13,9 @@
 
 int pbtx_sigp_init();
 
-const unsigned char* pbtx_sigp_public_key();
+int pbtx_sigp_get_public_key(unsigned char* buf, size_t buflen, size_t* olen);
 
-void pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig_buf, size_t* sig_size);
+int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig_buf, size_t buflen, size_t* sig_size);
 
 
 #endif
