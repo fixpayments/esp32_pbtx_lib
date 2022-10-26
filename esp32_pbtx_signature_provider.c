@@ -370,8 +370,8 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
         return -1;
     }
 
-    if( buflen < 65 ) {
-        ESP_LOGE(TAG, "Buffer must be at least 65 bytes long");
+    if( buflen < 66 ) {
+        ESP_LOGE(TAG, "Buffer must be at least 66 bytes long");
         return -1;
     }
 
@@ -395,7 +395,7 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
     mbedtls_sha256_update( &md_ctx, data, datalen );
     mbedtls_sha256_finish( &md_ctx, hash );
     mbedtls_sha256_free( &md_ctx );
-
+    
     mbedtls_ecp_keypair* ec = mbedtls_pk_ec( privkey_ctx );
 
     MBEDTLS_MPI_CHK( mbedtls_ecdsa_sign( &(ec->MBEDTLS_PRIVATE(grp)), &r, &s, &(ec->MBEDTLS_PRIVATE(d)),
@@ -429,11 +429,15 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
         goto cleanup;
     }
 
-    sig_buf[0] = nRecId+27+4;
+    *sig_buf = PBTX_KEY_TYPE_ANTELOPE_R1;
+    sig_buf++;
+    *sig_buf = nRecId+27+4;
+    sig_buf++;
     int len = mbedtls_mpi_size( &r );
-    mbedtls_mpi_write_binary( &r, sig_buf + 1, len );
-    mbedtls_mpi_write_binary( &s, sig_buf + 1 + len, len);
-    *sig_size = 1 + len * 2;
+    mbedtls_mpi_write_binary( &r, sig_buf, len );
+    sig_buf += len;
+    mbedtls_mpi_write_binary( &s, sig_buf, len);
+    *sig_size = 2 + len * 2;
 
 cleanup:
     mbedtls_entropy_free( &entropy );

@@ -30,9 +30,6 @@ int pbtx_client_get_public_key(unsigned char* buf, size_t buflen, size_t* olen)
 
     pubkey.key_bytes.size = pubkey_bytes_size;
 
-    ESP_LOGI(TAG, "pubkey_bytes_size: %d", pubkey_bytes_size);
-    ESP_LOG_BUFFER_HEX(TAG, pubkey.key_bytes.bytes, sizeof(pubkey.key_bytes.bytes));
-
     pb_ostream_t stream = pb_ostream_from_buffer(buf, buflen);
     if( !pb_encode(&stream, pbtx_PublicKey_fields, &pubkey) ) {
         ESP_LOGE(TAG, "pb_encode error: %s", PB_GET_ERROR(&stream));
