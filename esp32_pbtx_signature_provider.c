@@ -224,6 +224,9 @@ static int mbedtls_ecp_set_compressed_coordinates(
     MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&(R->MBEDTLS_PRIVATE(Y)), &r));
     MBEDTLS_MPI_CHK(mbedtls_mpi_lset(&(R->MBEDTLS_PRIVATE(Z)), 1));
     ESP_LOGE(TAG, "XXX1");
+    if( mbedtls_ecp_check_pubkey( grp, R ) != 0 ) {
+        ESP_LOGE(TAG, "R does not belong to the group");
+    }
     ret = 0;
 
 cleanup:
@@ -261,9 +264,10 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     int ret;
     *result = 0;
 
-    mbedtls_mpi_uint i = (mbedtls_mpi_uint)recid / 2;
+    int i = recid / 2;
+    ESP_LOGE(TAG, " the i: %d", i);
 
-    mbedtls_ecp_group* group = &(ec->MBEDTLS_PRIVATE(grp));
+    const mbedtls_ecp_group* group = &(ec->MBEDTLS_PRIVATE(grp));
     const mbedtls_mpi* order = &(group->N);
 
     mbedtls_mpi x; mbedtls_mpi_init(&x);
@@ -276,6 +280,8 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     mbedtls_ecp_point R; mbedtls_ecp_point_init(&R);
     mbedtls_ecp_point O; mbedtls_ecp_point_init(&O);
     mbedtls_ecp_point Q; mbedtls_ecp_point_init(&Q);
+
+    mbedtls_ecp_group grpcopy; mbedtls_ecp_group_init( &grpcopy );
 
     /*  1.0 For j from 0 to h   (h == recId here and the loop is outside this function)
         1.1 Let x = r + jn */
@@ -290,20 +296,24 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
 
                     More concisely, what these points mean is to use X as a compressed public key. */
 
-    /* Cannot have point co-ordinates larger than this as everything takes place modulo Q. */
-    if( mbedtls_mpi_cmp_mpi( &x, &(ec->MBEDTLS_PRIVATE(grp).P) ) >= 0 ) { ret = 0; goto cleanup; }
-
-
+    /* Cannot have point co-ordinates larger than this as everything takes place modulo P. */
+    if( mbedtls_mpi_cmp_mpi( &x, &(group->P) ) >= 0 ) { ESP_LOGE(TAG, "ZZZZZ"); ret = 0; goto cleanup; }
+    
     /*  Compressed keys require you to know an extra bit of data about the y-coord as there are two possibilities.
         So it's encoded in the recId. */
     MBEDTLS_MPI_CHK( mbedtls_ecp_set_compressed_coordinates(&R, group, &x, recid % 2) );
-    ESP_LOGE(TAG, "XXX2");
+    ESP_LOGE(TAG, "R:");
+
+    ESP_LOG_BUFFER_HEX(TAG, R.MBEDTLS_PRIVATE(X).MBEDTLS_PRIVATE(p), 32); 
+    ESP_LOG_BUFFER_HEX(TAG, R.MBEDTLS_PRIVATE(Y).MBEDTLS_PRIVATE(p), 32); 
 
     /* 1.4 check if nR is infinity */
+    /*
     MBEDTLS_MPI_CHK( mbedtls_ecp_mul( group, &O, order, &R, f_rng, p_rng) );
     ESP_LOGE(TAG, "XXX3");
     if( mbedtls_ecp_is_zero( &O ) ) { ret = 0; goto cleanup; }
-
+    */
+    
     /* 1.5. Compute e from M using Steps 2 and 3 of ECDSA signature verification. */
     MBEDTLS_MPI_CHK( mbedtls_mpi_read_binary( &e, hash, 32 ) );
 
@@ -323,8 +333,9 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     */
 
     MBEDTLS_MPI_CHK( mbedtls_mpi_lset( &zero, 0 ) );
-    MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi( &e, &zero, &e ) ); // now "e" is -e
-
+    MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi( &e, &zero, &e ) );
+    MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &e, &e, order ) ); // now "e" is -e
+ 
     MBEDTLS_MPI_CHK( mbedtls_mpi_inv_mod( &rr, r, order ) ); // rr is mi(r)
 
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &sor, &rr, s ) );
@@ -333,7 +344,11 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &eor, &rr, &e ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &eor, &eor, order ) ); // eor = mi(r) * -e mod n
 
-    MBEDTLS_MPI_CHK( mbedtls_ecp_muladd(group, &Q, &eor, &R, &sor, &(group->G) ) );
+    ESP_LOGE(TAG, "XXX4");
+    /* mbedtls_ecp_mul() needs a non-const group... */
+    mbedtls_ecp_group_copy( &grpcopy, group );
+    MBEDTLS_MPI_CHK( mbedtls_ecp_muladd(&grpcopy, &Q, &sor, &R, &eor, &(group->G) ) );
+    ESP_LOGE(TAG, "XXX5");
 
     ESP_LOGI(TAG, "recId: %d", recid);
     ESP_LOGI(TAG, "Q:");
@@ -344,6 +359,7 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     /* compare Q and public key */
     if( mbedtls_ecp_point_cmp( &Q, &(ec->MBEDTLS_PRIVATE(Q)) ) == 0 ) {
         *result = 1;  // they are equal
+        ESP_LOGI(TAG, "YAY");
     }
 
     ret = 0;
@@ -358,6 +374,8 @@ cleanup:
     mbedtls_ecp_point_free(&R);
     mbedtls_ecp_point_free(&O);
     mbedtls_ecp_point_free(&Q);
+    mbedtls_ecp_group_free( &grpcopy );
+
     return ret;
 }
 
@@ -408,12 +426,13 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
     MBEDTLS_MPI_CHK( mbedtls_mpi_copy(&halforder, &(ec->MBEDTLS_PRIVATE(grp).N)) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_shift_r( &halforder, 1 ) ); // halforder is n/2
     if( mbedtls_mpi_cmp_mpi( &s, &halforder ) > 0 ) {
-        ESP_LOGD(TAG, "high s");
+        ESP_LOGI(TAG, "high s");
         MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi(&s, &(ec->MBEDTLS_PRIVATE(grp).N), &s) ); // s := n - s
     }
 
     int nRecId = -1;
     for (int i=0; i<4; i++) {
+        ESP_LOGI(TAG, "i: %d", i);
         int result;
         MBEDTLS_MPI_CHK( pbtx_sigp_recover_key(&result, ec, &r, &s, hash, i,
                                                mbedtls_ctr_drbg_random, &ctr_drbg) );
