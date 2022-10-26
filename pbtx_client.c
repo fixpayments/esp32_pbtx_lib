@@ -42,3 +42,9 @@ int pbtx_client_get_public_key(unsigned char* buf, size_t buflen, size_t* olen)
     *olen = stream.bytes_written;
     return 0;
 }
+
+
+int pbtx_client_sign_data(const unsigned char* data, size_t datalen, unsigned char* sig_buf, size_t buflen, size_t* sig_size)
+{
+    return pbtx_sigp_sign(data, datalen, sig_buf, buflen, sig_size);
+}

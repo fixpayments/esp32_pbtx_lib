@@ -223,7 +223,6 @@ static int mbedtls_ecp_set_compressed_coordinates(
     MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&(R->MBEDTLS_PRIVATE(X)), x));
     MBEDTLS_MPI_CHK(mbedtls_mpi_copy(&(R->MBEDTLS_PRIVATE(Y)), &r));
     MBEDTLS_MPI_CHK(mbedtls_mpi_lset(&(R->MBEDTLS_PRIVATE(Z)), 1));
-    ESP_LOGE(TAG, "XXX1");
     if( mbedtls_ecp_check_pubkey( grp, R ) != 0 ) {
         ESP_LOGE(TAG, "R does not belong to the group");
     }
@@ -265,7 +264,6 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     *result = 0;
 
     int i = recid / 2;
-    ESP_LOGE(TAG, " the i: %d", i);
 
     const mbedtls_ecp_group* group = &(ec->MBEDTLS_PRIVATE(grp));
     const mbedtls_mpi* order = &(group->N);
@@ -297,23 +295,15 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
                     More concisely, what these points mean is to use X as a compressed public key. */
 
     /* Cannot have point co-ordinates larger than this as everything takes place modulo P. */
-    if( mbedtls_mpi_cmp_mpi( &x, &(group->P) ) >= 0 ) { ESP_LOGE(TAG, "ZZZZZ"); ret = 0; goto cleanup; }
-    
+    if( mbedtls_mpi_cmp_mpi( &x, &(group->P) ) >= 0 ) { ret = 0; goto cleanup; }
+
     /*  Compressed keys require you to know an extra bit of data about the y-coord as there are two possibilities.
         So it's encoded in the recId. */
     MBEDTLS_MPI_CHK( mbedtls_ecp_set_compressed_coordinates(&R, group, &x, recid % 2) );
-    ESP_LOGE(TAG, "R:");
-
-    ESP_LOG_BUFFER_HEX(TAG, R.MBEDTLS_PRIVATE(X).MBEDTLS_PRIVATE(p), 32); 
-    ESP_LOG_BUFFER_HEX(TAG, R.MBEDTLS_PRIVATE(Y).MBEDTLS_PRIVATE(p), 32); 
 
     /* 1.4 check if nR is infinity */
-    /*
-    MBEDTLS_MPI_CHK( mbedtls_ecp_mul( group, &O, order, &R, f_rng, p_rng) );
-    ESP_LOGE(TAG, "XXX3");
-    if( mbedtls_ecp_is_zero( &O ) ) { ret = 0; goto cleanup; }
-    */
-    
+    /* we skip the check because mbedtls_ecp_mul() demands that the multiplier is lower than N */
+
     /* 1.5. Compute e from M using Steps 2 and 3 of ECDSA signature verification. */
     MBEDTLS_MPI_CHK( mbedtls_mpi_read_binary( &e, hash, 32 ) );
 
@@ -335,7 +325,7 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     MBEDTLS_MPI_CHK( mbedtls_mpi_lset( &zero, 0 ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi( &e, &zero, &e ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &e, &e, order ) ); // now "e" is -e
- 
+
     MBEDTLS_MPI_CHK( mbedtls_mpi_inv_mod( &rr, r, order ) ); // rr is mi(r)
 
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &sor, &rr, s ) );
@@ -344,22 +334,13 @@ static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_m
     MBEDTLS_MPI_CHK( mbedtls_mpi_mul_mpi( &eor, &rr, &e ) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( &eor, &eor, order ) ); // eor = mi(r) * -e mod n
 
-    ESP_LOGE(TAG, "XXX4");
     /* mbedtls_ecp_mul() needs a non-const group... */
     mbedtls_ecp_group_copy( &grpcopy, group );
     MBEDTLS_MPI_CHK( mbedtls_ecp_muladd(&grpcopy, &Q, &sor, &R, &eor, &(group->G) ) );
-    ESP_LOGE(TAG, "XXX5");
-
-    ESP_LOGI(TAG, "recId: %d", recid);
-    ESP_LOGI(TAG, "Q:");
-    ESP_LOG_BUFFER_HEX(TAG, Q.MBEDTLS_PRIVATE(X).MBEDTLS_PRIVATE(p), 32); 
-    ESP_LOGI(TAG, "pubkey:");
-    ESP_LOG_BUFFER_HEX(TAG, ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X).MBEDTLS_PRIVATE(p), 32); 
 
     /* compare Q and public key */
     if( mbedtls_ecp_point_cmp( &Q, &(ec->MBEDTLS_PRIVATE(Q)) ) == 0 ) {
         *result = 1;  // they are equal
-        ESP_LOGI(TAG, "YAY");
     }
 
     ret = 0;
@@ -389,8 +370,8 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
         return -1;
     }
 
-    if( buflen < 66 ) {
-        ESP_LOGE(TAG, "Buffer must be at least 64 bytes long");
+    if( buflen < 65 ) {
+        ESP_LOGE(TAG, "Buffer must be at least 65 bytes long");
         return -1;
     }
 
@@ -426,13 +407,13 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
     MBEDTLS_MPI_CHK( mbedtls_mpi_copy(&halforder, &(ec->MBEDTLS_PRIVATE(grp).N)) );
     MBEDTLS_MPI_CHK( mbedtls_mpi_shift_r( &halforder, 1 ) ); // halforder is n/2
     if( mbedtls_mpi_cmp_mpi( &s, &halforder ) > 0 ) {
-        ESP_LOGI(TAG, "high s");
         MBEDTLS_MPI_CHK( mbedtls_mpi_sub_mpi(&s, &(ec->MBEDTLS_PRIVATE(grp).N), &s) ); // s := n - s
     }
 
+    /* the canonical recovery algorithm goes for i in [0,3]. But secp256r1 has the cofactr h=1,
+       so the key is always found for i in [0,1], and higher vaues of i will fail the x<P condition */
     int nRecId = -1;
-    for (int i=0; i<4; i++) {
-        ESP_LOGI(TAG, "i: %d", i);
+    for (int i=0; i<2; i++) {
         int result;
         MBEDTLS_MPI_CHK( pbtx_sigp_recover_key(&result, ec, &r, &s, hash, i,
                                                mbedtls_ctr_drbg_random, &ctr_drbg) );
@@ -449,9 +430,9 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
     }
 
     sig_buf[0] = nRecId+27+4;
-    int len = mbedtls_mpi_size( &s );
-    mbedtls_mpi_write_binary( &s, sig_buf + 1, len );
-    mbedtls_mpi_write_binary( &r, sig_buf + 1 + len, len);
+    int len = mbedtls_mpi_size( &r );
+    mbedtls_mpi_write_binary( &r, sig_buf + 1, len );
+    mbedtls_mpi_write_binary( &s, sig_buf + 1 + len, len);
     *sig_size = 1 + len * 2;
 
 cleanup:
