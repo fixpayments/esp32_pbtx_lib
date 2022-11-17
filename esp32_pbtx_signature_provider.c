@@ -9,23 +9,40 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/ecdsa.h"
 #include "mbedtls/sha256.h"
+#include "mbedtls/pk.h"
 
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_mac.h"
 
 static const char* TAG = "pbtx_sigp";
 
 static mbedtls_pk_context privkey_ctx;
 
 
+#define PEM_KEY_BUFLEN 1000
 
 #define STORAGE_NAMESPACE "pbtx_sigp"
-#define PEM_KEY_BUFLEN 1000
-#define PEM_KEY_NVSKEY "privkey"
+
+#define NVSKEY_PEM_KEY        "privkey"
+#define NVSKEY_IDENTITY       "identity"
+#define NVSKEY_SEQ            "seq"
+#define NVSKEY_RPC_MSGHASH    "msghash"
+
+typedef struct s_pbtx_identity {
+    uint64_t network_id;
+    uint64_t actor_id;
+} pbtx_identity;
+
+typedef struct s_pbtx_seq {
+    uint32_t last_seqnum;
+    uint64_t prev_hash;
+} pbtx_seq;
+
 
 int pbtx_sigp_init()
 {
-    esp_err_t err;
+    esp_err_t err = 0;
 
     err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -49,35 +66,35 @@ int pbtx_sigp_init()
                                        (const unsigned char *) pers,
                                        strlen( pers ) ) ) != 0 )  {
         ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %x\n", err );
-        return -1;
+        goto cleanup;
     }
 
     nvs_handle_t nvsh;
 
     if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
         ESP_LOGE(TAG, "nvs_open returned %x", err);
-        return err;
+        goto cleanup;
     }
 
     unsigned char* pem_key_buf = malloc(PEM_KEY_BUFLEN);
     size_t pem_key_len = 0;
-    err = nvs_get_str(nvsh, PEM_KEY_NVSKEY, NULL, &pem_key_len);
+    err = nvs_get_str(nvsh, NVSKEY_PEM_KEY, NULL, &pem_key_len);
     if( err == ESP_OK ) {
         /* the private key is found on NVS */
         if( pem_key_len > PEM_KEY_BUFLEN ) {
             ESP_LOGE(TAG, "private key string on NVS is too long: %d bytes", pem_key_len);
-            return -1;
+            err = -1; goto cleanup;
         }
 
-        if( (err = nvs_get_str(nvsh, PEM_KEY_NVSKEY, (char*) pem_key_buf, &pem_key_len)) != ESP_OK ) {
+        if( (err = nvs_get_str(nvsh, NVSKEY_PEM_KEY, (char*) pem_key_buf, &pem_key_len)) != ESP_OK ) {
             ESP_LOGE(TAG, "Cannot read private key from NVS: %x", err);
-            return -1;
+            goto cleanup;
         }
 
         if( (err = mbedtls_pk_parse_key(&privkey_ctx, pem_key_buf, pem_key_len, NULL, 0,
                                         mbedtls_ctr_drbg_random, &ctr_drbg)) != 0 ) {
             ESP_LOGE(TAG, "mbedtls_pk_parse_key returned error: %x", err);
-            return -1;
+            goto cleanup;
         }
 
         ESP_LOGI(TAG, "Loaded key from NVS");
@@ -88,47 +105,54 @@ int pbtx_sigp_init()
         if( ( err = mbedtls_pk_setup( &privkey_ctx,
                                       mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY) ) ) != 0 ) {
             ESP_LOGE(TAG, "mbedtls_pk_setup returned -0x%04x", (unsigned int) -err );
-            return -1;
+            goto cleanup;
         }
 
         if( ( err = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1,
                                         mbedtls_pk_ec( privkey_ctx ),
                                         mbedtls_ctr_drbg_random, &ctr_drbg ) ) != 0 ) {
             ESP_LOGE(TAG, "mbedtls_ecdsa_genkey returned -0x%04x", (unsigned int) -err );
-            return -1;
+            goto cleanup;
         }
 
         if( ( err = mbedtls_pk_write_key_pem( &privkey_ctx, pem_key_buf, PEM_KEY_BUFLEN ) ) != 0 ) {
             ESP_LOGE(TAG, "mbedtls_pk_write_key_pem returned -0x%04x", (unsigned int) -err );
-            return -1;
+            goto cleanup;
         }
 
         ESP_LOGI(TAG, "Saving the key to NVS...");
 
-        if( (err = nvs_set_str(nvsh, PEM_KEY_NVSKEY, (char*) pem_key_buf)) != ESP_OK ) {
+        if( (err = nvs_set_str(nvsh, NVSKEY_PEM_KEY, (char*) pem_key_buf)) != ESP_OK ) {
             ESP_LOGE(TAG, "nvs_set_str returned %x", err);
-            return -1;
+            goto cleanup;
+        }
+
+        if( (err =  nvs_commit(nvsh)) != ESP_OK ) {
+            ESP_LOGE(TAG, "nvs_commit returned %x", err);
+            goto cleanup;
         }
     }
 
     if( !mbedtls_pk_can_do(&privkey_ctx, MBEDTLS_PK_ECKEY) ) {
         ESP_LOGE(TAG, "This not an ECKEY");
-        return -1;
+        err = -1; goto cleanup;
     }
-
-    mbedtls_ctr_drbg_free( &ctr_drbg );
-    mbedtls_entropy_free( &entropy );
 
     ESP_LOGI(TAG, "pbtx_sigp_init() finsihed. Public key:");
 
     if( (err = mbedtls_pk_write_pubkey_pem( &privkey_ctx, pem_key_buf, PEM_KEY_BUFLEN)) != 0 ) {
             ESP_LOGE(TAG, "mbedtls_pk_write_pubkey_pem returned -0x%04x", (unsigned int) -err );
-            return -1;
+            goto cleanup;
     }
 
     printf("%s\n", pem_key_buf);
 
-    return 0;
+cleanup:    
+    mbedtls_ctr_drbg_free( &ctr_drbg );
+    mbedtls_entropy_free( &entropy );
+    nvs_close(nvsh);
+    
+    return err;
 }
 
 
@@ -237,24 +261,25 @@ cleanup:
 
 
 /*
-         * Given the components of a signature and a selector value, recover and return the public
-         * key that generated the signature according to the algorithm in SEC1v2 section 4.1.6.
-         *
-         *
-         * The recId is an index from 0 to 3 which indicates which of the 4 possible keys is the
-         * correct one. Because the key recovery operation yields multiple potential keys, the correct
-         * key must either be stored alongside the signature, or you must be willing to try each recId
-         * in turn until you find one that outputs the key you are expecting.
-         *
-         *
-         * If this method returns null it means recovery was not possible and recId should be
-         * iterated.
-         *
-         *
-         * Given the above two points, a correct usage of this method is inside a for loop from 0 to
-         * 3, and if the output is null OR a key that is not the one you expect, you try again with the
-         * next recId.
-         */
+ * Given the components of a signature and a selector value, recover
+ * and return the public key that generated the signature according to
+ * the algorithm in SEC1v2 section 4.1.6.
+ *
+ * The recId is an index from 0 to 3 which indicates which of the 4
+ * possible keys is the correct one. Because the key recovery
+ * operation yields multiple potential keys, the correct key must
+ * either be stored alongside the signature, or you must be willing to
+ * try each recId in turn until you find one that outputs the key you
+ * are expecting.
+ *
+ * If this method returns null it means recovery was not possible and
+ * recId should be iterated.
+ *
+ *
+ * Given the above two points, a correct usage of this method is
+ * inside a for loop from 0 to 3, and if the output is null OR a key
+ * that is not the one you expect, you try again with the next recId.
+ */
 
 static int pbtx_sigp_recover_key(int *result, mbedtls_ecp_keypair *ec, mbedtls_mpi *r, mbedtls_mpi *s,
                                  unsigned char *hash, int recid,
@@ -395,7 +420,7 @@ int pbtx_sigp_sign(const unsigned char* data, size_t datalen, unsigned char* sig
     mbedtls_sha256_update( &md_ctx, data, datalen );
     mbedtls_sha256_finish( &md_ctx, hash );
     mbedtls_sha256_free( &md_ctx );
-    
+
     mbedtls_ecp_keypair* ec = mbedtls_pk_ec( privkey_ctx );
 
     MBEDTLS_MPI_CHK( mbedtls_ecdsa_sign( &(ec->MBEDTLS_PRIVATE(grp)), &r, &s, &(ec->MBEDTLS_PRIVATE(d)),
@@ -446,4 +471,270 @@ cleanup:
     mbedtls_mpi_free( &s );
     mbedtls_mpi_free( &halforder );
     return ret;
+}
+
+
+
+static int pbtx_sigp_read_identity(pbtx_identity *id)
+{
+    int err = 0;
+    
+    nvs_handle_t nvsh;
+    size_t id_length = 0;
+    id->network_id = 0;
+    id->actor_id = 0;
+    
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    err = nvs_get_blob(nvsh, NVSKEY_IDENTITY, NULL, &id_length);
+    if( err == ESP_OK ) {
+        if( id_length != sizeof(pbtx_identity) ) {
+            ESP_LOGE(TAG, "invalid length %d at %s", id_length, NVSKEY_IDENTITY);
+            err = -1; goto cleanup;
+        }
+        
+        if( (err = nvs_get_blob(nvsh, NVSKEY_IDENTITY, id, &id_length)) != ESP_OK ) {
+            ESP_LOGE(TAG, "Cannot read %s from NVS: %x", NVSKEY_IDENTITY, err);
+            goto cleanup;
+        }
+    }
+    
+cleanup:    
+    nvs_close(nvsh);    
+    return err;
+}
+
+
+
+int pbtx_sigp_has_identity()
+{
+    pbtx_identity id;
+    pbtx_sigp_read_identity(&id);
+    if( id.network_id != 0 && id.actor_id != 0 ) {
+        return 1;
+    }
+    return 0;
+}
+
+
+
+int pbtx_sigp_gen_actor_id(uint64_t *actor_id)
+{
+    int err = 0;
+
+    pbtx_identity id;
+    pbtx_sigp_read_identity(&id);
+    
+    nvs_handle_t nvsh;
+    uint8_t macaddr[8];
+    
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+    
+    if( id.network_id != 0 ) {
+        ESP_LOGE(TAG, "pbtx_sigp_gen_actor_id: tried to overwrite an existing identity");
+        err = -1; goto cleanup;
+    }
+
+    if( id.actor_id == 0 ) {
+        // first try: take MAC address as seed
+        if( (err = esp_efuse_mac_get_default(macaddr)) != 0 ) {
+            ESP_LOGE(TAG, "esp_efuse_mac_get_default returned error");
+            goto cleanup;
+        }
+
+        id.actor_id = *((uint64_t *) macaddr);
+    }
+
+    // calculate sha256 of previous value and use first 64bit from the hash
+    unsigned char hash[32];
+    mbedtls_sha256_context md_ctx;
+    mbedtls_sha256_init( &md_ctx );
+    mbedtls_sha256_starts( &md_ctx, 0 );
+    mbedtls_sha256_update( &md_ctx, (uint8_t *)&id.actor_id, sizeof(id.actor_id) );
+    mbedtls_sha256_finish( &md_ctx, hash );
+    mbedtls_sha256_free( &md_ctx );
+
+    id.actor_id = *((uint64_t *) hash);
+    
+    if( (err = nvs_set_blob(nvsh, NVSKEY_IDENTITY, &id, sizeof(id))) != ESP_OK ) {
+        ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_IDENTITY, err);
+        goto cleanup;
+    }
+
+    if( (err =  nvs_commit(nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_commit returned %x", err);
+        goto cleanup;
+    }
+
+    *actor_id = id.actor_id;    
+    
+cleanup:    
+    nvs_close(nvsh);    
+    return err;
+}
+
+
+
+
+int pbtx_sigp_save_last_rpc_msghash(const unsigned char* data, size_t datalen)
+{
+    int err = 0;
+    nvs_handle_t nvsh;
+    
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    if( (err = nvs_set_blob(nvsh, NVSKEY_RPC_MSGHASH, data, datalen)) != ESP_OK ) {
+        ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_RPC_MSGHASH, err);
+        goto cleanup;
+    }    
+    
+cleanup:    
+    nvs_close(nvsh);    
+    return err;
+}
+
+
+
+int pbtx_sigp_get_last_rpc_msghash(unsigned char* buf, size_t buflen, size_t* olen)
+{
+    int err = 0;
+    nvs_handle_t nvsh;
+    
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    size_t hash_len;
+    err = nvs_get_blob(nvsh, NVSKEY_RPC_MSGHASH, NULL, &hash_len);
+    if( err == ESP_OK ) {
+        if( hash_len > buflen ) {
+            ESP_LOGE(TAG, "pbtx_sigp_get_last_rpc_msghash buffer too short: %d bytes, need %d bytes", buflen, hash_len);
+            err = -1; goto cleanup;
+        }
+        
+        if( (err = nvs_get_blob(nvsh, NVSKEY_RPC_MSGHASH, buf, olen)) != ESP_OK ) {
+            ESP_LOGE(TAG, "Cannot read %s from NVS: %x", NVSKEY_IDENTITY, err);
+            goto cleanup;
+        }
+    }
+    else if( err == ESP_ERR_NVS_NOT_FOUND ) {
+        ESP_LOGI(TAG, "No msghash on NVS");
+        *olen = 0;
+    }
+
+cleanup:    
+    nvs_close(nvsh);    
+    return err;
+}
+
+
+int pbtx_sigp_upd_network(uint64_t network_id, uint32_t last_seqnum, uint64_t prev_hash)
+{
+    int err = 0;
+    nvs_handle_t nvsh;
+
+    pbtx_seq seq;
+    seq.last_seqnum = last_seqnum;
+    seq.prev_hash = prev_hash;
+
+    pbtx_identity id;
+    pbtx_sigp_read_identity(&id);
+    if( id.network_id != 0 ) {
+        ESP_LOGE(TAG, "pbtx_sigp_upd_network: cannot overwrite an existing identity");
+        return -1;
+    }   
+        
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    if( (err = nvs_set_blob(nvsh, NVSKEY_IDENTITY, &id, sizeof(id))) != ESP_OK ) {
+        ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_IDENTITY, err);
+        goto cleanup;
+    }
+
+    if( (err = nvs_set_blob(nvsh, NVSKEY_SEQ, &seq, sizeof(seq))) != ESP_OK ) {
+        ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_SEQ, err);
+        goto cleanup;
+    }
+
+    if( (err =  nvs_commit(nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_commit returned %x", err);
+        goto cleanup;
+    }
+
+cleanup:    
+    nvs_close(nvsh);    
+    return err;    
+}
+
+
+
+int pbtx_sigp_upd_seq(uint32_t last_seqnum, uint64_t prev_hash)
+{
+    int err = 0;
+    nvs_handle_t nvsh;
+    
+    pbtx_seq seq;
+    seq.last_seqnum = last_seqnum;
+    seq.prev_hash = prev_hash;
+
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    if( (err = nvs_set_blob(nvsh, NVSKEY_SEQ, &seq, sizeof(seq))) != ESP_OK ) {
+        ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_SEQ, err);
+        goto cleanup;
+    }
+
+    if( (err =  nvs_commit(nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_commit returned %x", err);
+        goto cleanup;
+    }
+
+cleanup:    
+    nvs_close(nvsh);    
+    return err;    
+}
+
+
+int pbtx_sigp_erase_identity()
+{
+    int err = 0;
+    nvs_handle_t nvsh;
+    
+    if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
+        ESP_LOGE(TAG, "nvs_open returned %x", err);
+        goto cleanup;
+    }
+
+    err = nvs_erase_key(nvsh, NVSKEY_IDENTITY);
+    if( err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND ) {
+        ESP_LOGE(TAG, "Cannot erase %s from NVS: %x", NVSKEY_IDENTITY, err);
+        goto cleanup;
+    }
+    
+    err = nvs_erase_key(nvsh, NVSKEY_SEQ);
+    if( err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND ) {
+        ESP_LOGE(TAG, "Cannot erase %s from NVS: %x", NVSKEY_SEQ, err);
+        goto cleanup;
+    }
+
+    err = 0;
+cleanup:    
+    nvs_close(nvsh);    
+    return err;    
 }

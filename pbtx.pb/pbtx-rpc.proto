@@ -1,0 +1,51 @@
+syntax = "proto3";
+// version: 1
+option java_multiple_files = true;
+
+package pbtxrpc;
+
+
+
+// The client registers itself at the network before starting to send
+// transactions. The Permission object contains the desired actor ID,
+// which is a 64-bit number generated from some persistent property at
+// the client (for example, a hash of the MAC address). If the request
+// is rejected, the client needs to re-try with a different actor ID.
+// The client may re-send the registration message. If the permission
+// object is identical  to the one previously seen, the server will
+// respond with a success.
+
+message RegisterAccount {
+    // pbtx.Permission message for a new or existing account, encoded
+    // as bytes.
+    bytes permision_bytes = 1;
+    
+    // PBTX-compatible signature of the above, signed by one of
+    // permission keys.
+    bytes signature = 2;
+}
+
+
+message RegisterAccountResponse {
+    // sha256 hash of the RegisterAccount message this response
+    // corresponds to
+    bytes request_hash = 1;
+
+    // indicates if the request was successful
+    enum StatusCode {
+        SUCCESS = 0;
+        INVALID_SIGNATURE = 1;
+        DUPLICATE_ACTOR = 2;
+    };
+    
+    StatusCode status = 2;
+    
+    // network ID for subsequent transactions
+    fixed64 network_id = 3 [jstype = JS_STRING];
+
+    // last transaction details, see pbtx.proto
+    uint32 last_seqnum = 4;
+    fixed64 prev_hash = 5 [jstype = JS_STRING];
+}
+
+

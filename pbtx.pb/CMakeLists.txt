@@ -2,7 +2,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../nanopb/extra)
 find_package(Nanopb REQUIRED)
 
 
-NANOPB_GENERATE_CPP(PROTO_SRCS PROTO_HDRS pbtx.proto)
+NANOPB_GENERATE_CPP(PROTO_SRCS PROTO_HDRS pbtx.proto pbtx-rpc.proto)
 
 message ("PROTO_SRCS = ${PROTO_SRCS}")
 message ("PROTO_HDRS = ${PROTO_HDRS}")
