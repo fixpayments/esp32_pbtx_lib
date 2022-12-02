@@ -27,7 +27,7 @@ int pbtx_sigp_gen_actor_id(uint64_t *actor_id);
 int pbtx_sigp_save_last_rpc_msghash(const unsigned char* data, size_t datalen);
 
 /* returns 0 on success */
-int pbtx_sigp_get_last_rpc_msghash(unsigned char* buf, size_t buflen, size_t* olen);
+int pbtx_sigp_check_last_rpc_msghash(unsigned char* hash, size_t hashlen);
 
 /* this finalizes the identity. Subsequent calls can decrease
  * last_seqnum and modify prev_hash, but network_id cannot be

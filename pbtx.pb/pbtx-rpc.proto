@@ -12,7 +12,7 @@ package pbtxrpc;
 // the client (for example, a hash of the MAC address). If the request
 // is rejected, the client needs to re-try with a different actor ID.
 // The client may re-send the registration message. If the permission
-// object is identical  to the one previously seen, the server will
+// object is identical to the one previously seen, the server will
 // respond with a success.
 
 message RegisterAccount {
