@@ -1,6 +1,6 @@
 pbtx.TransactionBody.cosignors              max_count:1
 pbtx.TransactionBody.transaction_content    max_size:2048
-pbtx.Transaction.body                       max_size:4096
+pbtx.Transaction.body                       max_size:2100
 pbtx.Transaction.authorities                max_count:2
 pbtx.Permission.keys                        max_count:1
 pbtx.PublicKey.key_bytes                    max_size:64

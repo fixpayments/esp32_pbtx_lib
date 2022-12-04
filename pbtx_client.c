@@ -180,6 +180,7 @@ int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* 
     trx_body.seqnum++;
     trx_body.transaction_type = transaction_type;
     memcpy(trx_body.transaction_content.bytes, transaction_content, content_length);
+    trx_body.transaction_content.size = content_length;
 
     pb_ostream_t bodystream = pb_ostream_from_buffer(trx.body.bytes, sizeof(trx.body.bytes));
     if( !pb_encode(&bodystream, pbtx_TransactionBody_fields, &trx_body) ) {
@@ -187,6 +188,8 @@ int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* 
         return -1;
     }
     trx.body.size = bodystream.bytes_written;
+
+    /* ESP_LOGI(TAG, "body length: %d", trx.body.size); */
 
     trx.authorities_count = 1;
     trx.authorities[0].type = pbtx_KeyType_EOSIO_KEY;
@@ -206,6 +209,7 @@ int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* 
     *olen = trxstream.bytes_written;
 
     trx_body.prev_hash = pbtx_sigp_calc_prevhash(trx.body.bytes, trx.body.size);
+    pbtx_sigp_upd_seq(trx_body.seqnum, trx_body.prev_hash);
     return 0;
 
 rollback:
