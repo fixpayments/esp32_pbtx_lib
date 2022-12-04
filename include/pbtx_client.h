@@ -3,6 +3,7 @@
 #define _PBTX_CLIENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* one-time client initialization. Returns 0 on success */
 int pbtx_client_init();
@@ -20,5 +21,9 @@ int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* 
    Returns 0 on success.
    On registration failure, returns RegisterAccountResponse.status. Otherwise, returns -1 */
 int pbtx_client_rpc_register_account_response(unsigned char* buf, size_t buflen);
-                                     
+
+/* writes a pbtx.Transaction message into the buffer. Returns 0 on success */
+int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* transaction_content, size_t content_length,
+                                unsigned char* buf, size_t buflen, size_t* olen);
+
 #endif

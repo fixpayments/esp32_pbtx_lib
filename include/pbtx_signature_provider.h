@@ -23,6 +23,10 @@ int pbtx_sigp_has_identity();
  * changed. Returns 0 on success */
 int pbtx_sigp_gen_actor_id(uint64_t *actor_id);
 
+/* reads the generated actor ID if there is any. Returns 0 on success. Sets the actor_id to zero if none is found */
+int pbtx_sigp_read_actor_id(uint64_t *actor_id);
+
+
 /* returns 0 on success */
 int pbtx_sigp_save_last_rpc_msghash(const unsigned char* data, size_t datalen);
 
@@ -39,6 +43,9 @@ int pbtx_sigp_get_identity(uint64_t *network_id, uint64_t *actor_id, uint32_t *l
 
 /* stores the increased last_seqnum and new prev_hash. Returns 0 on success */
 int pbtx_sigp_upd_seq(uint32_t last_seqnum, uint64_t prev_hash);
+
+/* calculates the next prevhash value (uint64 from first 8 bytes of sha256 */
+uint64_t pbtx_sigp_calc_prevhash(const unsigned char* body, size_t bodylen);
 
 /* erases the identity. Returns 0 on success */
 int pbtx_sigp_erase_identity();

@@ -580,6 +580,19 @@ cleanup:
 }
 
 
+int pbtx_sigp_read_actor_id(uint64_t *actor_id)
+{
+    pbtx_identity id;
+    if( pbtx_sigp_read_identity(&id) != 0 ) {
+        *actor_id = 0;
+        return -1;
+    }
+
+    *actor_id = id.actor_id;
+    return 0;
+}
+
+
 
 
 int pbtx_sigp_save_last_rpc_msghash(const unsigned char* data, size_t datalen)
@@ -780,6 +793,25 @@ int pbtx_sigp_upd_seq(uint32_t last_seqnum, uint64_t prev_hash)
 cleanup:
     nvs_close(nvsh);
     return err;
+}
+
+
+uint64_t pbtx_sigp_calc_prevhash(const unsigned char* body, size_t bodylen)
+{
+    unsigned char hash[32];
+    mbedtls_sha256_context md_ctx;
+    mbedtls_sha256_init( &md_ctx );
+    mbedtls_sha256_starts( &md_ctx, 0 );
+    mbedtls_sha256_update( &md_ctx, body, bodylen );
+    mbedtls_sha256_finish( &md_ctx, hash );
+    mbedtls_sha256_free( &md_ctx );
+
+    uint64_t body_hash = 0;
+    for( uint32_t i = 0; i < 8; i++ ) {
+        body_hash = (body_hash << 8) | hash[i];
+    }
+
+    return body_hash;
 }
 
 
