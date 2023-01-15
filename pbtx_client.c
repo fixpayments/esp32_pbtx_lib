@@ -84,14 +84,17 @@ int pbtx_client_rpc_request_response(unsigned char* buf, size_t buflen, unsigned
         return msg.status;
     }
 
-    *data_size = msg.data.size;
-    if( msg.data.size > 0 ) {
-        if( msg.data.size > data_buflen ) {
-            ESP_LOGE(TAG, "pbtx_client_rpc_request_response: data_buflen is too short. Got %d, need %d", data_buflen, msg.data.size);
-            return -1;
+    if( data_buf != NULL ) {
+        *data_size = msg.data.size;
+        if( msg.data.size > 0 ) {
+            if( msg.data.size > data_buflen ) {
+                ESP_LOGE(TAG, "pbtx_client_rpc_request_response: data_buflen is too short. Got %d, need %d", data_buflen, msg.data.size);
+                return -1;
+            }
+            memcpy(data_buf, msg.data.bytes, msg.data.size);
         }
-        memcpy(data_buf, msg.data.bytes, msg.data.size);
     }
+
     return 0;
 }
 
@@ -249,9 +252,24 @@ int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* 
 
     trx_body.prev_hash = pbtx_sigp_calc_prevhash(trx.body.bytes, trx.body.size);
     pbtx_sigp_upd_seq(trx_body.seqnum, trx_body.prev_hash);
+
+    if( pbtx_sigp_save_last_rpc_msghash(buf, trxstream.bytes_written) != 0 ) {
+        return -1;
+    }
+
     return 0;
 
 rollback:
     trx_body.seqnum = old_seqnum;
     return -1;
+}
+
+
+int pbtx_client_rpc_transaction_response(unsigned char* buf, size_t buflen)
+{
+    int res = pbtx_client_rpc_request_response(buf, buflen, NULL, 0, NULL);
+    if( res != 0 ) {
+        ESP_LOGE(TAG, "pbtx_client_rpc_request_response returned %d", res);
+    }
+    return res;
 }

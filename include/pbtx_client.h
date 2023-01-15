@@ -21,13 +21,17 @@ int pbtx_client_rpc_request_response(unsigned char* buf, size_t buflen, unsigned
 /* writes a pbtxrpc.RegisterAccount message into the buffer */
 int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* olen);
 
-/* takes a pbtxrpc.RegisterAccountResponse and saves the identity.
+/* takes a pbtxrpc.RequestResponse and saves the identity.
    Returns 0 on success.
-   On registration failure, returns RegisterAccountResponse.status. Otherwise, returns -1 */
+   On registration failure, returns RequestResponse.status. Otherwise, returns -1 */
 int pbtx_client_rpc_register_account_response(unsigned char* buf, size_t buflen);
 
 /* writes a pbtx.Transaction message into the buffer. Returns 0 on success */
 int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* transaction_content, size_t content_length,
                                 unsigned char* buf, size_t buflen, size_t* olen);
+
+/* takes a pbtxrpc.RequestResponse as response to Transaction Returns 0 on success */
+int pbtx_client_rpc_transaction_response(unsigned char* buf, size_t buflen);
+
 
 #endif
