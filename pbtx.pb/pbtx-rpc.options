@@ -1,3 +1,5 @@
-pbtxrpc.RegisterAccount.permision_bytes         max_size:512
+pbtxrpc.RequestResponse.request_hash            max_size:32
+pbtxrpc.RequestResponse.data                    max_size:64
+pbtxrpc.RegisterAccount.permission_bytes        max_size:512
 pbtxrpc.RegisterAccount.signature               max_size:128
-pbtxrpc.RegisterAccountResponse.request_hash    max_size:32
+pbtxrpc.RegisterAccount.credentials             max_size:512

@@ -560,7 +560,7 @@ int pbtx_sigp_gen_actor_id(uint64_t *actor_id)
     mbedtls_sha256_finish( &md_ctx, hash );
     mbedtls_sha256_free( &md_ctx );
 
-    id.actor_id = *((uint64_t *) hash);
+    id.actor_id = *((uint64_t *) hash) & 0x7FFFFFFFFFFFFFFF;
 
     if( (err = nvs_set_blob(nvsh, NVSKEY_IDENTITY, &id, sizeof(id))) != ESP_OK ) {
         ESP_LOGE(TAG, "Cannot write %s to NVS: %x", NVSKEY_IDENTITY, err);
@@ -692,6 +692,8 @@ int pbtx_sigp_upd_network(uint64_t network_id, uint32_t last_seqnum, uint64_t pr
         ESP_LOGE(TAG, "pbtx_sigp_upd_network: cannot overwrite an existing identity");
         return -1;
     }
+
+    id.network_id = network_id;
 
     if( (err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvsh)) != ESP_OK ) {
         ESP_LOGE(TAG, "nvs_open returned %x", err);

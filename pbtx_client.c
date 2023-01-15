@@ -28,6 +28,8 @@ int pbtx_client_init()
         trx_body.actor = 0;
     }
 
+    ESP_LOGI(TAG, "pbtx_client_init: network_id=%llu, actor=%llu",  trx_body.network_id, trx_body.actor);
+
     trx_body.cosignors_count = 0;
     return 0;
 }
@@ -64,6 +66,39 @@ int pbtx_client_has_identity()
 
 
 
+int pbtx_client_rpc_request_response(unsigned char* buf, size_t buflen, unsigned char* data_buf, size_t data_buflen, size_t* data_size)
+{
+    pbtxrpc_RequestResponse msg;
+    pb_istream_t msg_stream = pb_istream_from_buffer(buf, buflen);
+    if( !pb_decode(&msg_stream, pbtxrpc_RequestResponse_fields, &msg) ) {
+        ESP_LOGE(TAG, "Error while decoding pbtxrpc_RequestResponse: %s", msg_stream.errmsg);
+        return -1;
+    }
+
+    if( pbtx_sigp_check_last_rpc_msghash(msg.request_hash.bytes, msg.request_hash.size) != 0 ) {
+        return -1;
+    }
+
+    if( msg.status != pbtxrpc_RequestResponse_StatusCode_SUCCESS ) {
+        ESP_LOGE(TAG, "RequestResponse.status is not a SUCCESS: %d", msg.status);
+        return msg.status;
+    }
+
+    *data_size = msg.data.size;
+    if( msg.data.size > 0 ) {
+        if( msg.data.size > data_buflen ) {
+            ESP_LOGE(TAG, "pbtx_client_rpc_request_response: data_buflen is too short. Got %d, need %d", data_buflen, msg.data.size);
+            return -1;
+        }
+        memcpy(data_buf, msg.data.bytes, msg.data.size);
+    }
+    return 0;
+}
+
+
+
+
+
 int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* olen)
 {
     pbtx_Permission perm;
@@ -85,23 +120,26 @@ int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* 
     }
     perm.keys[0].weight = 1;
 
-    pb_ostream_t permstream = pb_ostream_from_buffer(msg.permision_bytes.bytes, sizeof(msg.permision_bytes.bytes));
+    pb_ostream_t permstream = pb_ostream_from_buffer(msg.permission_bytes.bytes, sizeof(msg.permission_bytes.bytes));
     if( !pb_encode(&permstream, pbtx_Permission_fields, &perm) ) {
         ESP_LOGE(TAG, "perm pb_encode error: %s", PB_GET_ERROR(&permstream));
         return -1;
     }
-    msg.permision_bytes.size = permstream.bytes_written;
+    msg.permission_bytes.size = permstream.bytes_written;
 
     size_t signature_size;
-    if( pbtx_sigp_sign(msg.permision_bytes.bytes, msg.permision_bytes.size,
+    if( pbtx_sigp_sign(msg.permission_bytes.bytes, msg.permission_bytes.size,
                        msg.signature.bytes, sizeof(msg.signature.bytes), &signature_size) != 0 ) {
         return -1;
     }
     msg.signature.size = signature_size;
 
+    msg.credentials.size = 0;
+
     pb_ostream_t stream = pb_ostream_from_buffer(buf, buflen);
     if( !pb_encode(&stream, pbtxrpc_RegisterAccount_fields, &msg) ) {
-        ESP_LOGE(TAG, "pb_encode error: %s", PB_GET_ERROR(&stream));
+        ESP_LOGE(TAG, "pb_encode error: %s, max_size: %d, written: %d",
+                 PB_GET_ERROR(&stream), stream.max_size, stream.bytes_written);
         return -1;
     }
 
@@ -115,50 +153,51 @@ int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* 
 
 
 
+
 int pbtx_client_rpc_register_account_response(unsigned char* buf, size_t buflen)
 {
-    pbtxrpc_RegisterAccountResponse msg;
-    pb_istream_t msg_stream = pb_istream_from_buffer(buf, buflen);
-    if( !pb_decode(&msg_stream, pbtxrpc_RegisterAccountResponse_fields, &msg) ) {
-        ESP_LOGE(TAG, "Error while decoding pbtxrpc_RegisterAccountResponse: %s", msg_stream.errmsg);
-        return -1;
+    unsigned char data[64];
+    size_t data_size;
+    int res = pbtx_client_rpc_request_response(buf, buflen, data, 64, &data_size);
+    if( res != 0 ) {
+        ESP_LOGE(TAG, "pbtx_client_rpc_request_response returned %d", res);
+        return res;
     }
 
-    if( pbtx_sigp_check_last_rpc_msghash(msg.request_hash.bytes, msg.request_hash.size) != 0 ) {
+    pbtxrpc_AccountSeqData seqdata;
+    pb_istream_t seqdata_stream = pb_istream_from_buffer(data, data_size);
+    if( !pb_decode(&seqdata_stream, pbtxrpc_AccountSeqData_fields, &seqdata) ) {
+        ESP_LOGE(TAG, "Error while decoding pbtxrpc_AccountSeqData: %s", seqdata_stream.errmsg);
         return -1;
-    }
-
-    if( msg.status != pbtxrpc_RegisterAccountResponse_StatusCode_SUCCESS ) {
-        ESP_LOGE(TAG, "RegisterAccountResponse.status is not a SUCCESS: %d", msg.status);
-        return msg.status;
     }
 
     if( pbtx_client_has_identity() ) {
-        if( msg.network_id != trx_body.network_id ) {
+        if( seqdata.network_id != trx_body.network_id ) {
             ESP_LOGE(TAG, "RegisterAccountResponse.network_id is not the same as previously known. Expected: %lld, received: %lld",
-                     trx_body.network_id, msg.network_id);
+                     trx_body.network_id, seqdata.network_id);
             return -1;
         }
 
-        if( msg.last_seqnum != trx_body.seqnum || msg.prev_hash != trx_body.prev_hash ) {
-            if( pbtx_sigp_upd_seq(msg.last_seqnum, msg.prev_hash) != 0 ) {
+        if( seqdata.last_seqnum != trx_body.seqnum || seqdata.prev_hash != trx_body.prev_hash ) {
+            if( pbtx_sigp_upd_seq(seqdata.last_seqnum, seqdata.prev_hash) != 0 ) {
                 return -1;
             }
-            trx_body.seqnum = msg.last_seqnum;
-            trx_body.prev_hash = msg.prev_hash;
+            trx_body.seqnum = seqdata.last_seqnum;
+            trx_body.prev_hash = seqdata.prev_hash;
         }
     }
     else {
-        if( pbtx_sigp_upd_network(msg.network_id, msg.last_seqnum, msg.prev_hash) != 0 ) {
+        if( pbtx_sigp_upd_network(seqdata.network_id, seqdata.last_seqnum, seqdata.prev_hash) != 0 ) {
             return -1;
         }
-        trx_body.network_id = msg.network_id;
-        trx_body.seqnum = msg.last_seqnum;
-        trx_body.prev_hash = msg.prev_hash;
+        trx_body.network_id = seqdata.network_id;
+        trx_body.seqnum = seqdata.last_seqnum;
+        trx_body.prev_hash = seqdata.prev_hash;
     }
 
     return 0;
 }
+
 
 
 int pbtx_client_rpc_transaction(uint32_t transaction_type, const unsigned char* transaction_content, size_t content_length,

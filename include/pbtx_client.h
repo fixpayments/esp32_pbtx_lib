@@ -14,6 +14,10 @@ int pbtx_client_sign_data(const unsigned char* data, size_t datalen, unsigned ch
 /* returns true if the network registration is finalized */
 int pbtx_client_has_identity();
 
+/* processes RequestResponse and copies the data field in the
+ * buffer. Returns 0 on success, -1 on interal error, or a positive number on RPC error status */
+int pbtx_client_rpc_request_response(unsigned char* buf, size_t buflen, unsigned char* data_buf, size_t data_buflen, size_t* data_size);
+
 /* writes a pbtxrpc.RegisterAccount message into the buffer */
 int pbtx_client_rpc_register_account(unsigned char* buf, size_t buflen, size_t* olen);
 

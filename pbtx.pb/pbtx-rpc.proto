@@ -5,6 +5,47 @@ option java_multiple_files = true;
 package pbtxrpc;
 
 
+// Every request is returning a RequestResponse message with a hash of
+// the original request, status, and request-specific data.  When the
+// client sends a pbtx.Transaction message, the response does not
+// contain any data.
+
+message RequestResponse {
+    // sha256 hash of the serialized request message
+    // that this response corresponds to.
+    bytes request_hash = 1;
+
+    // indicates if the request was successful
+    enum StatusCode {
+        SUCCESS = 0;
+        INVALID_SIGNATURE = 1;
+        DUPLICATE_ACTOR = 2;
+        INVALID_CREDENTIALS = 3;
+        INVALID_ACTOR = 4;
+        INVALID_NETWORK_ID = 5;
+        INVALID_AUTHORITY = 6;
+        INVALID_SEQ = 7;
+        INVALID_CONTENT = 8;
+        INFRASTRUCTURE_ERROR = 100;
+    };
+    
+    StatusCode status = 2;
+
+    // serialized data message
+    bytes data = 3;    
+}
+
+
+// object in RequestResponse.data
+message AccountSeqData {
+    fixed64 network_id = 1 [jstype = JS_STRING];
+    fixed64 actor = 2 [jstype = JS_STRING];
+
+    // last transaction details, see pbtx.proto
+    uint32 last_seqnum = 3;
+    fixed64 prev_hash = 4 [jstype = JS_STRING];
+}
+
 
 // The client registers itself at the network before starting to send
 // transactions. The Permission object contains the desired actor ID,
@@ -13,39 +54,32 @@ package pbtxrpc;
 // is rejected, the client needs to re-try with a different actor ID.
 // The client may re-send the registration message. If the permission
 // object is identical to the one previously seen, the server will
-// respond with a success.
+// respond with a success. The response must contain AccountSeqData in
+// response data.
 
 message RegisterAccount {
     // pbtx.Permission message for a new or existing account, encoded
     // as bytes.
-    bytes permision_bytes = 1;
+    bytes permission_bytes = 1;
     
     // PBTX-compatible signature of the above, signed by one of
     // permission keys.
     bytes signature = 2;
+
+    // optional field, up to 512 bytes, containing a certificate that can
+    // be verified by the registration service
+    bytes credentials = 3;
 }
 
 
-message RegisterAccountResponse {
-    // sha256 hash of the RegisterAccount message this response
-    // corresponds to
-    bytes request_hash = 1;
 
-    // indicates if the request was successful
-    enum StatusCode {
-        SUCCESS = 0;
-        INVALID_SIGNATURE = 1;
-        DUPLICATE_ACTOR = 2;
-    };
-    
-    StatusCode status = 2;
-    
-    // network ID for subsequent transactions
-    fixed64 network_id = 3 [jstype = JS_STRING];
+// The client may request the latest registered sequence number and
+// prev_hash in order to re-send a transaction or re-sync itself.  The
+// response must contain AccountSeqData in resonse data.
 
-    // last transaction details, see pbtx.proto
-    uint32 last_seqnum = 4;
-    fixed64 prev_hash = 5 [jstype = JS_STRING];
+message GetSeq {
+    // actor account ID
+    fixed64 actor = 1 [jstype = JS_STRING];
 }
 
 
